@@ -7,7 +7,7 @@ from keep_alive import keep_alive
 
 # ================= CONFIGURATION =================
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
-MODEL_NAME = "gemini-flash-lite-latest"
+MODEL_NAME = "gemini-2.5-flash"
 
 # Setup Discord Client & Command Tree for Slash Commands
 intents = discord.Intents.default()
