@@ -20,4 +20,4 @@ Because this bot utilizes AI, messages sent in the configured channels are proce
 If you wish to have your server's data (including your API key and Channel IDs) permanently deleted from our database, simply kick the bot from your server or contact us.
 
 ### 5. Contact
-If you have any questions, please contact us at: [Your Contact Info or Support Server Link]
+If you have any questions, please contact us at: [Eksodia Studio](https://discord.gg/mJkSGdSsjt)
