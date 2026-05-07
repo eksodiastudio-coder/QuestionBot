@@ -196,7 +196,8 @@ async def on_message(message):
             # Create a specific client using this server's API Key
             server_genai_client = genai.Client(api_key=config['api_key'])
 
-            response = server_genai_client.models.generate_content(
+            # Notice the added 'await' and '.aio.'
+            response = await server_genai_client.aio.models.generate_content(
                 model=MODEL_NAME,
                 contents=prompt
             )
@@ -230,9 +231,12 @@ async def on_message(message):
                     await message.reply(response_text)
 
         except Exception as e:
-            print(f"API Error in server {message.guild.name}: {e}")
+            # flush=True forces Render to print this instantly
+            print(f"API Error in server {message.guild.name}: {e}", flush=True) 
+            
             if "API_KEY_INVALID" in str(e):
-                 await message.channel.send("⚠️ The API key provided for this server is invalid or has expired. Please ask an admin to run `/setup` again.")
-
+                 await message.channel.send("⚠️ The API key provided for this server is invalid. Please run `/setup` again.")
+            else:
+                 await message.channel.send("⚠️ I encountered an error while trying to think. (Check Render Logs)")
 keep_alive()
 client_discord.run(DISCORD_TOKEN)
