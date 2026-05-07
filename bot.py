@@ -5,8 +5,6 @@ import os
 import sqlite3
 from keep_alive import keep_alive 
 
-load_dotenv()
-
 # ================= CONFIGURATION =================
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 MODEL_NAME = "gemini-flash-lite-latest"
