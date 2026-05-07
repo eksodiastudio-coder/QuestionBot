@@ -1,7 +1,6 @@
 import discord
 from discord import app_commands
 from google import genai
-from dotenv import load_dotenv
 import os
 import sqlite3
 from keep_alive import keep_alive 
