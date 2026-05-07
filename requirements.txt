@@ -3,3 +3,4 @@ google-genai
 asyncio
 flask
 python-dotenv
+pymongo
