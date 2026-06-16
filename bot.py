@@ -7,8 +7,10 @@ from keep_alive import keep_alive
 
 # ================= CONFIGURATION =================
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
-MONGO_URI = os.getenv("MONGO_URI") # Grab Mongo URI from Render
-MODEL_NAME = "gemini-2.5-flash"
+MONGO_URI = os.getenv("MONGO_URI") 
+DEFAULT_MODEL = "gemini-2.0-flash"
+# IMPORTANT: Replace this with your actual SKU ID from the Discord Developer Portal
+PREMIUM_SKU_ID = 1516180697310691392 
 
 # Setup Discord Client & Command Tree
 intents = discord.Intents.default()
@@ -19,7 +21,6 @@ tree = app_commands.CommandTree(client_discord)
 server_knowledge_memory = {}
 
 # ================= DATABASE SETUP =================
-# Connect to MongoDB
 mongo_client = MongoClient(MONGO_URI)
 db = mongo_client["QuestionBotDB"]
 configs_collection = db["server_configs"]
@@ -27,6 +28,11 @@ configs_collection = db["server_configs"]
 def get_server_config(guild_id):
     """Retrieves the configuration for a specific server from MongoDB."""
     return configs_collection.find_one({"_id": guild_id})
+
+def is_premium(interaction: discord.Interaction):
+    """Checks if the guild or user has an active subscription entitlement."""
+    # Check if any active entitlement matches your premium SKU ID
+    return any(entitlement.sku_id == PREMIUM_SKU_ID for entitlement in interaction.entitlements)
 
 # ================= KNOWLEDGE BUILDER =================
 async def build_knowledge_base(guild_id):
@@ -37,7 +43,12 @@ async def build_knowledge_base(guild_id):
 
     dynamic_kb = ""
     
-    helper_channel = client_discord.get_channel(config['add_channel'])
+    # Use the channel ID saved in the database
+    channel_id = config.get('add_channel')
+    if not channel_id:
+        return False
+
+    helper_channel = client_discord.get_channel(channel_id)
     if helper_channel:
         try:
             messages = [msg async for msg in helper_channel.history(limit=500)]
@@ -49,7 +60,7 @@ async def build_knowledge_base(guild_id):
             print(f"Error reading helper channel for guild {guild_id}: {e}")
     
     server_knowledge_memory[guild_id] = f"--- SERVER RULES & ANSWERS ---\n{dynamic_kb}"
-    print(f"Knowledge compiled for server {guild_id}! ({len(server_knowledge_memory[guild_id])} chars)")
+    print(f"Knowledge compiled for server {guild_id}!")
     return True
 
 # ================= EVENTS & COMMANDS =================
@@ -59,20 +70,17 @@ async def on_ready():
     print(f'Logged in as {client_discord.user}')
     print("MongoDB Connected and Slash Commands synced.")
 
-@tree.command(name="setup", description="Admin setup for the AI Bot")
+@tree.command(name="setup", description="Basic setup for the AI Bot channels")
 @app_commands.checks.has_permissions(administrator=True)
 async def setup(interaction: discord.Interaction, 
-                api_key: str, 
                 questions_channel: discord.TextChannel, 
                 missing_answers_channel: discord.TextChannel, 
                 add_answers_channel: discord.TextChannel):
-    """Slash command for Server Admins to set up the bot."""
+    """Slash command for Server Admins to set up the basic bot channels."""
     
-    # Save to MongoDB (Upsert means it creates a new entry, or updates an existing one)
     configs_collection.update_one(
         {"_id": interaction.guild_id},
         {"$set": {
-            "api_key": api_key,
             "questions_channel": questions_channel.id,
             "missing_channel": missing_answers_channel.id,
             "add_channel": add_answers_channel.id
@@ -83,13 +91,56 @@ async def setup(interaction: discord.Interaction,
     await build_knowledge_base(interaction.guild_id)
 
     await interaction.response.send_message(
-        f"✅ **Setup Complete!**\n"
-        f"- Questions Channel: {questions_channel.mention}\n"
-        f"- Unanswered Alerts: {missing_answers_channel.mention}\n"
-        f"- Knowledge Channel: {add_answers_channel.mention}\n"
-        f"*(Your data is now securely saved in the cloud)*", 
+        f"✅ **Basic Setup Complete!**\n"
+        f"- Questions: {questions_channel.mention}\n"
+        f"- Unanswered: {missing_answers_channel.mention}\n"
+        f"- Knowledge: {add_answers_channel.mention}\n\n"
+        f"💎 *Premium members can use `/changeapi` and `/changemodel` to unlock full AI power.*", 
         ephemeral=True 
     )
+
+@tree.command(name="changeapi", description="💎 Premium: Change the Gemini API Key for this server")
+@app_commands.checks.has_permissions(administrator=True)
+async def change_api(interaction: discord.Interaction, api_key: str):
+    """Premium command to set a custom API Key."""
+    if not is_premium(interaction):
+        await interaction.response.send_message(
+            "❌ **Subscription Required**: This feature is locked. Please subscribe via the server shop to use your own API keys.", 
+            ephemeral=True
+        )
+        return
+
+    configs_collection.update_one(
+        {"_id": interaction.guild_id},
+        {"$set": {"api_key": api_key}},
+        upsert=True
+    )
+    
+    await interaction.response.send_message("💎 **Success:** The server API key has been updated.", ephemeral=True)
+
+@tree.command(name="changemodel", description="💎 Premium: Choose a more powerful AI model")
+@app_commands.checks.has_permissions(administrator=True)
+@app_commands.choices(model=[
+    app_commands.Choice(name="Gemini 2.0 Flash (Fast & Default)", value="gemini-2.0-flash"),
+    app_commands.Choice(name="Gemini 2.0 Pro (Most Intelligent)", value="gemini-2.0-pro-exp-02-05"),
+    app_commands.Choice(name="Gemini 1.5 Pro (Better for long text)", value="gemini-1.5-pro"),
+])
+async def change_model(interaction: discord.Interaction, model: app_commands.Choice[str]):
+    """Premium command to change the AI model."""
+    if not is_premium(interaction):
+        await interaction.response.send_message(
+            "❌ **Subscription Required**: You need an active subscription to upgrade the AI model.", 
+            ephemeral=True
+        )
+        return
+
+    configs_collection.update_one(
+        {"_id": interaction.guild_id},
+        {"$set": {"model_name": model.value}},
+        upsert=True
+    )
+    
+    await interaction.response.send_message(f"💎 **Model Updated:** The bot is now using `{model.name}`.", ephemeral=True)
 
 @tree.command(name="reload_knowledge", description="Forces the bot to re-read the knowledge channel")
 @app_commands.checks.has_permissions(administrator=True)
@@ -110,12 +161,14 @@ async def on_message(message):
     if not config:
         return
 
-    if message.channel.id == config['add_channel']:
+    # Check if this is the knowledge channel
+    if message.channel.id == config.get('add_channel'):
         await build_knowledge_base(message.guild.id) 
         await message.add_reaction("🧠")
         return
 
-    if message.channel.id != config['questions_channel']:
+    # Check if this is the questions channel
+    if message.channel.id != config.get('questions_channel'):
         return
 
     is_question = message.content.strip().endswith("?")
@@ -124,39 +177,43 @@ async def on_message(message):
     if not (is_question or is_mentioned):
         return
 
+    # Check if an API key exists (Premium users must set this via /changeapi)
+    api_key = config.get("api_key")
+    if not api_key:
+        await message.reply("⚠️ No API key configured. An admin must run `/changeapi` (Premium Feature).")
+        return
+
     if message.guild.id not in server_knowledge_memory:
         await build_knowledge_base(message.guild.id)
         
     kb_text = server_knowledge_memory.get(message.guild.id, "")
+    model_name = config.get("model_name", DEFAULT_MODEL)
 
     async with message.channel.typing():
         try:
+            # Get conversation context
             history_buffer = []
             async for msg in message.channel.history(limit=5):
-                clean_content = msg.clean_content 
-                history_buffer.append(f"{msg.author.name}: {clean_content}")
+                history_buffer.append(f"{msg.author.name}: {msg.clean_content}")
             
             history_buffer.reverse()
             conversation_text = "\n".join(history_buffer)
 
             prompt = (
-            f"You are a helpful assistant for a Discord server. "
-            f"Use the 'Knowledge Base' below to answer the user's question.\n\n"
-            
-            f"INSTRUCTIONS FOR AI:\n"
-            f"1. **Match Concepts:** Apply the rules directly based on the text provided.\n"
-            f"2. **Be Direct:** Answer clearly without fluff.\n"
-            f"3. **When to use SILENCE:** If the answer is NOT found in the Knowledge Base provided below, you MUST reply with exactly the word 'SILENCE'. Do not make up answers.\n"
-            f"4. Do NOT use markdown headers like #.\n\n"
-
-            f"{kb_text}\n\n"
-            f"--- CONVERSATION HISTORY ---\n{conversation_text}\n\n"
-            f"User Question: {message.content}"
+                f"You are a helpful assistant for a Discord server. "
+                f"Use the 'Knowledge Base' below to answer the user's question.\n\n"
+                f"INSTRUCTIONS:\n"
+                f"1. If the answer is NOT in the Knowledge Base, reply exactly 'SILENCE'.\n"
+                f"2. Do not use markdown headers.\n\n"
+                f"KNOWLEDGE BASE:\n{kb_text}\n\n"
+                f"--- CONVERSATION HISTORY ---\n{conversation_text}\n\n"
+                f"User Question: {message.content}"
             )
 
-            server_genai_client = genai.Client(api_key=config['api_key'])
+            # Initialize client with server-specific API key and Model
+            server_genai_client = genai.Client(api_key=api_key)
             response = await server_genai_client.aio.models.generate_content(
-                model=MODEL_NAME,
+                model=model_name,
                 contents=prompt
             )
             
@@ -164,33 +221,29 @@ async def on_message(message):
                 response_text = response.text.strip()
                 
                 if response_text == "SILENCE":
-                    print(f"Answer not found in Guild {message.guild.name}. Forwarding to missing answers channel.")
-                    missing_channel = client_discord.get_channel(config['missing_channel'])
+                    missing_channel_id = config.get('missing_channel')
+                    missing_channel = client_discord.get_channel(missing_channel_id)
                     if missing_channel:
                         await missing_channel.send(
-                            f"🚨 **Unanswered Question** 🚨\n"
+                            f"🚨 **Unanswered Question**\n"
                             f"**User:** {message.author.mention}\n"
-                            f"**Question:** {message.content}\n"
-                            f"*Please add the answer to the <#{config['add_channel']}> channel.*"
+                            f"**Question:** {message.content}"
                         )
                     return 
 
+                # Handle Discord's 2000 character limit
                 if len(response_text) > 2000:
-                    parts = [response_text[i:i+1900] for i in range(0, len(response_text), 1900)]
-                    for index, part in enumerate(parts):
-                        if index == 0:
-                            await message.reply(part)
-                        else:
-                            await message.channel.send(part)
+                    for i in range(0, len(response_text), 1900):
+                        await message.channel.send(response_text[i:i+1900])
                 else:
                     await message.reply(response_text)
 
         except Exception as e:
-            print(f"API Error in server {message.guild.name}: {e}", flush=True) 
+            print(f"API Error: {e}")
             if "API_KEY_INVALID" in str(e):
-                 await message.channel.send("⚠️ The API key provided for this server is invalid. Please run `/setup` again.")
+                 await message.channel.send("⚠️ The API key for this server is invalid.")
             else:
-                 await message.channel.send("⚠️ I encountered an error while trying to think. (Check Render Logs)")
+                 await message.channel.send("⚠️ I encountered an error while thinking.")
 
 keep_alive()
 client_discord.run(DISCORD_TOKEN)
