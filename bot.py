@@ -8,7 +8,7 @@ from keep_alive import keep_alive
 # ================= CONFIGURATION =================
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 MONGO_URI = os.getenv("MONGO_URI") 
-DEFAULT_MODEL = "gemini-2.0-flash"
+DEFAULT_MODEL = "gemini-2.5-flash"
 # IMPORTANT: Replace this with your actual SKU ID from the Discord Developer Portal
 PREMIUM_SKU_ID = 1516180697310691392 
 
